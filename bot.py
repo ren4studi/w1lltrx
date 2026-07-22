@@ -6,22 +6,25 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.filters import Command
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import (
+    InlineKeyboardMarkup, InlineKeyboardButton,
+    ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
+)
 
 # ====================== НАСТРОЙКИ ======================
-BOT_TOKEN = "8497720886:AAHpilIlyrNChgH2c7B95DVMGYkIQbOnHWs"               # Токен от @BotFather
-ADMIN_IDS = [823985747]                    # Telegram ID администраторов
-GROUP_CHAT_ID = -5582366189             # ID группы для уведомлений (с минусом)
+BOT_TOKEN = "8497720886:AAHpilIlyrNChgH2c7B95DVMGYkIQbOnHWs"
+ADMIN_IDS = [823985747]
+GROUP_CHAT_ID = -5582366189
 # =======================================================
 
 # ---------- Хранилище в оперативной памяти ----------
 settings = {
-    "rate": 0.42,              # курс 1 TRX = 0.08 USD (пример)
-    "min_amount": 10,           # минимальная сумма покупки в USD
-    "wallet": "TGFapPGxfC6E82vF87WGnfDrHuiZxW9yAc"  # ваш кошелёк для приёма USDT (TRC20)
+    "rate": 0.42,
+    "min_amount": 10,
+    "wallet": "TGFapPGxfC6E82vF87WGnfDrHuiZxW9yAc"
 }
 
-orders = {}        # order_id -> dict
+orders = {}
 order_counter = 0
 # ------------------------------------------------------
 
@@ -42,7 +45,27 @@ class AdminStates(StatesGroup):
     wallet = State()
     broadcast = State()
 
-# -------------------- Клавиатуры --------------------
+# -------------------- Reply‑клавиатуры --------------------
+def main_reply_keyboard():
+    """Клавиатура под полем ввода — основные кнопки."""
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="🛒 Купить TRX")],
+            [KeyboardButton(text="📋 Мои заказы"), KeyboardButton(text="ℹ️ Помощь")]
+        ],
+        resize_keyboard=True,
+        input_field_placeholder="Выберите действие..."
+    )
+
+def cancel_reply_keyboard():
+    """Клавиатура с кнопкой Отмена (для ввода данных)."""
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="↩️ Отмена")]],
+        resize_keyboard=True,
+        input_field_placeholder="Введите данные или отмените..."
+    )
+
+# -------------------- Инлайн‑клавиатуры (твои) --------------------
 def main_menu():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🛒 Купить TRX", callback_data="buy_trx")],
@@ -52,10 +75,10 @@ def main_menu():
 
 def buy_menu():
     return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="30 TRX", callback_data="amt:30"),
+         InlineKeyboardButton(text="50 TRX", callback_data="amt:50")],
         [InlineKeyboardButton(text="100 TRX", callback_data="amt:100"),
-         InlineKeyboardButton(text="500 TRX", callback_data="amt:500")],
-        [InlineKeyboardButton(text="1000 TRX", callback_data="amt:1000"),
-         InlineKeyboardButton(text="5000 TRX", callback_data="amt:5000")],
+         InlineKeyboardButton(text="150 TRX", callback_data="amt:150")],
         [InlineKeyboardButton(text="🔢 Своя сумма", callback_data="custom_amount")],
         [InlineKeyboardButton(text="↩️ Назад", callback_data="start")]
     ])
@@ -96,7 +119,6 @@ def new_order_id():
     return order_counter
 
 async def notify_group(order):
-    """Отправка уведомления в группу после подтверждения заказа."""
     text = (
         "🔔 <b>Новый заказ TRX (подтверждён)</b>\n\n"
         f"👤 Пользователь: @{order['username']} ({order['first_name']})\n"
@@ -113,12 +135,14 @@ async def notify_group(order):
 @dp.message(Command("start"))
 async def start_cmd(message: types.Message):
     await message.answer(
-        "💎 <b>SwillTRX</b> — покупка TRX!\n\n"
-        "💎Все заявки обрабатываются вручную\n"
-        "Выберите действие:",
-        reply_markup=main_menu(),
+        "💎 <b>SwillTRX</b> — покупка TRX, без AML проверок!\n"
+        "💎 Все заявки обрабатываются вручную.\n"
+        "🧾 Выберите действие:",
+        reply_markup=main_reply_keyboard(),  # <-- Reply‑клавиатура
         parse_mode="HTML"
     )
+    # Дополнительно отправляем инлайн‑меню (можно и без него, но оставим)
+    await message.answer("Или используйте кнопки ниже:", reply_markup=main_menu())
 
 @dp.message(Command("admin"))
 async def admin_cmd(message: types.Message):
@@ -126,16 +150,72 @@ async def admin_cmd(message: types.Message):
         return await message.answer("⛔ Доступ запрещён.")
     await message.answer("🔐 Админ‑панель", reply_markup=admin_panel(), parse_mode="HTML")
 
+# -------------------- Обработка Reply‑кнопок --------------------
+@dp.message(F.text == "🛒 Купить TRX")
+async def reply_buy_trx(message: types.Message):
+    # Имитируем нажатие инлайн‑кнопки
+    rate = settings["rate"]
+    min_am = settings["min_amount"]
+    await message.answer(
+        f"🛒 <b>Покупка TRX</b>\n\n"
+        f"📈 Курс: 1 TRX = {rate:.4f} USD\n"
+        f"🔻 Минимальная сумма: {min_am} USD\n\n"
+        "Выберите количество TRX:",
+        reply_markup=buy_menu(),
+        parse_mode="HTML"
+    )
+
+@dp.message(F.text == "📋 Мои заказы")
+async def reply_my_orders(message: types.Message):
+    user_id = message.from_user.id
+    user_orders = [o for o in orders.values() if o["user_id"] == user_id]
+    if not user_orders:
+        await message.answer("У вас пока нет заказов.", reply_markup=main_reply_keyboard())
+        return
+    lines = ["📋 <b>Ваши заказы:</b>\n"]
+    for o in sorted(user_orders, key=lambda x: x["id"], reverse=True)[:5]:
+        status_emoji = {"pending":"⏳","paid":"💰","confirmed":"✅"}.get(o["status"], "❓")
+        lines.append(
+            f"{status_emoji} <b>#{o['id']}</b> | {o['amount_trx']} TRX | {o['price']:.2f} USD\n"
+            f"Статус: {o['status']}"
+        )
+    await message.answer("\n".join(lines), reply_markup=main_reply_keyboard(), parse_mode="HTML")
+
+@dp.message(F.text == "ℹ️ Помощь")
+async def reply_help(message: types.Message):
+    await message.answer(
+        "ℹ️ <b>Как купить TRX:</b>\n"
+        "1️⃣ Выберите количество TRX\n"
+        "2️⃣ Переведите USD (USDT) на указанный кошелёк\n"
+        "3️⃣ Укажите ваш TRC20‑адрес для получения TRX и ссылку транзакции\n"
+        "4️⃣ Оператор проверит платёж и <b>вручную</b> отправит вам TRX\n"
+        "Время ожидания перевода до 15 минут.",
+        reply_markup=main_reply_keyboard(),
+        parse_mode="HTML"
+    )
+
+@dp.message(F.text == "↩️ Отмена")
+async def cancel_action(message: types.Message, state: FSMContext):
+    current_state = await state.get_state()
+    if current_state is not None:
+        await state.clear()
+        await message.answer("🚫 Действие отменено.", reply_markup=main_reply_keyboard())
+        await message.answer("Главное меню:", reply_markup=main_menu())
+    else:
+        await message.answer("Вы не в процессе ввода.", reply_markup=main_reply_keyboard())
+
 # -------------------- Callback: главное меню --------------------
 @dp.callback_query(F.data == "start")
 async def back_to_start(call: types.CallbackQuery):
     await call.message.edit_text(
         "💎 <b>SwillTRX</b> — покупка TRX вручную оператором.\n\n"
-        "💎Все заявки обрабатываются вручную\n"
-        "Выберите действие:",
+        "💎 Все заявки обрабатываются вручную\n"
+        "🧾 Выберите действие:",
         reply_markup=main_menu(),
         parse_mode="HTML"
     )
+    # Обновим reply‑клавиатуру на всякий случай
+    await call.message.answer("Главное меню:", reply_markup=main_reply_keyboard())
 
 @dp.callback_query(F.data == "help")
 async def help_info(call: types.CallbackQuery):
@@ -143,9 +223,9 @@ async def help_info(call: types.CallbackQuery):
         "ℹ️ <b>Как купить TRX:</b>\n"
         "1️⃣ Выберите количество TRX\n"
         "2️⃣ Переведите USD (USDT) на указанный кошелёк\n"
-        "3️⃣ Укажите ваш TRC20‑адрес для получения TRX и хеш транзакции\n"
+        "3️⃣ Укажите ваш TRC20‑адрес для получения TRX и ссылку транзакции\n"
         "4️⃣ Оператор проверит платёж и <b>вручную</b> отправит вам TRX\n"
-        "Все уведомления дублируются в нашу группу.",
+        "Время ожидания перевода до 15 минут.",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="↩️ Назад", callback_data="start")]
         ]),
@@ -174,18 +254,23 @@ async def fixed_amount(call: types.CallbackQuery):
 @dp.callback_query(F.data == "custom_amount")
 async def ask_custom(call: types.CallbackQuery, state: FSMContext):
     await call.message.edit_text("✏️ Введите желаемое количество TRX (только число):", parse_mode="HTML")
+    # Показываем reply‑клавиатуру с Отменой
+    await call.message.answer("Введите число или нажмите «Отмена»:", reply_markup=cancel_reply_keyboard())
     await state.set_state(BuyStates.custom_amount)
 
 @dp.message(BuyStates.custom_amount)
 async def custom_amount_input(message: types.Message, state: FSMContext):
+    # Проверка на отмену уже сделана выше
     try:
         amount = float(message.text)
         if amount <= 0:
             raise ValueError
     except:
-        await message.answer("❌ Введите положительное число.")
+        await message.answer("❌ Введите положительное число.", reply_markup=cancel_reply_keyboard())
         return
     await state.clear()
+    # Возвращаем основную reply‑клавиатуру
+    await message.answer("Продолжаем...", reply_markup=main_reply_keyboard())
     await process_trx_amount(message, amount)
 
 async def process_trx_amount(event, amount_trx):
@@ -253,6 +338,7 @@ async def paid_step(call: types.CallbackQuery, state: FSMContext):
         "Формат: начинается с <code>T</code>, 34 символа.",
         parse_mode="HTML"
     )
+    await call.message.answer("Введите адрес или нажмите «Отмена»:", reply_markup=cancel_reply_keyboard())
     await state.update_data(order_id=oid)
     await state.set_state(BuyStates.trx_wallet)
 
@@ -260,13 +346,18 @@ async def paid_step(call: types.CallbackQuery, state: FSMContext):
 async def get_trx_wallet(message: types.Message, state: FSMContext):
     addr = message.text.strip()
     if not addr.startswith("T") or len(addr) != 34:
-        await message.answer("❌ Некорректный адрес TRC20. Попробуйте ещё раз.")
+        await message.answer("❌ Некорректный адрес TRC20. Попробуйте ещё раз.", reply_markup=cancel_reply_keyboard())
         return
     data = await state.get_data()
     oid = data["order_id"]
     orders[oid]["trx_wallet"] = addr
     await state.update_data(order_id=oid)
-    await message.answer("🔗 Предоставьте ссылку на оплаченную транзакцию (Нажмите на транзакцию - Посмотреть в обозревателе блоков), или поставьте прочерк:", parse_mode="HTML")
+    await message.answer(
+        "🔗 Предоставьте ссылку на оплаченную транзакцию (Нажмите на транзакцию - Посмотреть в обозревателе блоков),\n\n"
+        "В противном случае поставьте прочерк:",
+        reply_markup=cancel_reply_keyboard(),
+        parse_mode="HTML"
+    )
     await state.set_state(BuyStates.tx_hash)
 
 @dp.message(BuyStates.tx_hash)
@@ -285,13 +376,15 @@ async def get_tx_hash(message: types.Message, state: FSMContext):
     await message.answer(
         "✅ <b>Заказ оплачен!</b>\n"
         f"Номер заказа: #{oid}\n"
-        "Ожидайте ручную проверку оператором. TRX будут отправлены на указанный вами адрес.",
-        reply_markup=main_menu(),
+        "Ожидайте ручную проверку оператором. TRX будут отправлены на указанный вами адрес\n\n"
+        "Если вы ошиблись с адресом, немедленно напишите в поддержку.",
+        reply_markup=main_reply_keyboard(),  # возвращаем основную клавиатуру
         parse_mode="HTML"
     )
+    await message.answer("Главное меню:", reply_markup=main_menu())
     await state.clear()
 
-    # Уведомление админам (личное сообщение)
+    # Уведомление админам
     for admin_id in ADMIN_IDS:
         try:
             await bot.send_message(
@@ -299,14 +392,14 @@ async def get_tx_hash(message: types.Message, state: FSMContext):
                 f"📥 Новый оплаченный заказ #{oid} от @{order['username']}\n"
                 f"Сумма: {order['amount_trx']} TRX / {order['price']:.2f} USD\n"
                 f"Адрес TRX: <code>{order['trx_wallet']}</code>\n"
-                f"TX хеш: <code>{order['tx_hash']}</code>",
+                f"Ссылка на транзакцию: <code>{order['tx_hash']}</code>",
                 reply_markup=confirm_order_btn(oid),
                 parse_mode="HTML"
             )
         except:
             pass
 
-# -------------------- Мои заказы --------------------
+# -------------------- Мои заказы (инлайн) --------------------
 @dp.callback_query(F.data == "my_orders")
 async def my_orders(call: types.CallbackQuery):
     user_id = call.from_user.id
@@ -323,7 +416,7 @@ async def my_orders(call: types.CallbackQuery):
         )
     await call.message.edit_text("\n".join(lines), reply_markup=main_menu(), parse_mode="HTML")
 
-# -------------------- Админ‑панель --------------------
+# -------------------- Админ‑панель (без изменений) --------------------
 @dp.callback_query(F.data == "admin_menu")
 async def back_admin(call: types.CallbackQuery):
     if call.from_user.id not in ADMIN_IDS:
@@ -424,7 +517,7 @@ async def pending_orders(call: types.CallbackQuery):
             f"👤 @{o['username']} ({o['first_name']})\n"
             f"💰 {o['amount_trx']} TRX = {o['price']:.2f} USD\n"
             f"🏦 TRX‑адрес: <code>{o['trx_wallet']}</code>\n"
-            f"🔗 TXID: <code>{o['tx_hash']}</code>\n"
+            f"🔗 Link: <code>{o['tx_hash']}</code>\n"
             f"📅 {o['created_at']}"
         )
         await call.message.answer(text, reply_markup=confirm_order_btn(o["id"]), parse_mode="HTML")
@@ -441,9 +534,7 @@ async def confirm_order(call: types.CallbackQuery):
         return
     order["status"] = "confirmed"
     await call.message.edit_text(f"✅ Заказ #{oid} подтверждён.", parse_mode="HTML")
-    # Уведомление в группу
     await notify_group(order)
-    # Уведомление пользователю
     try:
         await bot.send_message(
             order["user_id"],
